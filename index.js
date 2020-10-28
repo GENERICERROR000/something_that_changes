@@ -1,51 +1,31 @@
 /*
-	Type 1 Time - 2020
-	by noah kernis
+	what:	something_that_changes
+	who:	noah kernis
+	when:	2020
 
 	==========
 
 	digital clock source
 		https://editor.p5js.org/D_Snyder/sketches/Xtx2Zu9D5
 
-	data generator
+	data generator source
 		https://github.com/openmhealth/sample-data-generator
 */
 
-/*
-	TODO:
-		- get data from "API" -> https://github.com/openmhealth/sample-data-generator
-		- as data changes over time, do action (direction change dependent)
-		
-		~1) install greensock~
-		2) create effects
-			- all effects need:
-				a) when to start
-				b) check if running
-				c) stop current run
-				d) return to "normal"
-		3) generate data 
-		4) create api 
-
-		* move shaders to strings so file is self contained
-
-	effects:
-		- high:
-			- +1 hr -> alarm goes off (gets louder and quicker)
-			- +3 hrs -> the clock face will become blurry
-			- +5 hrs -> the clock face will begin to fade out until it full disappears
-			- for every high within a 24hr period, the clock takes that much longer to return to baseline
-		- low:
-			- +10 min -> the clock face will shake, 
-				-> shaking increases over time
-			- +20 min -> drift from the center of the UI and rotate slightly
-			- +30 min -> the clock face may blur a bit
-			- +40 -> min the clock face will begin to fade out until it full disappears
-			- severe lows -> shader color effect
-*/
+// baseline settings for trends
+const HIGH = 200
+const LOW = 69
+const SEVERE_LOW = 50
+const ALARM = 60 * 60
+const BLUR = 2 * 60 * 60
+const HIGH_FADE = 2 * 60 * 60
+const SHAKE = 10 * 60
+const DRIFT = 20 * 60
+const LOW_FADE = 30 * 60
 
 // baseline settings for clock
-const CLOCK_X_NORMAL = 0 // -windowWidth - windowWidth  
-const CLOCK_Y_NORMAL = 0 // -windowHeight - windowHeight
+const CLOCK_X_NORMAL = 0 // -windowWidth/2 - windowWidth/2
+const CLOCK_Y_NORMAL = 0 // -windowHeight/2 - windowHeight/2
 const CLOCK_ALPHA_NORMAL = 255 // 225 - 0 (opaque - transparent)	
 const CLOCK_ROTATION_NORMAL = 0 // (-1 - 1) (rotate 360 left - rotate 360 right)
 const CLOCK_BLUR_NORMAL = 7.0 // 7.0 - 0.2 (none - full blur)
@@ -54,6 +34,7 @@ const CLOCK_ALARM_AMPLITUDE_NORMAL = 0.1 // 0.1 - 0.9 (quiet - loud)
 const CLOCK_ALARM_SPEED_NORMAL = 25 // 25 - 1 (slow - fast)
 const CLOCK_HEAL_RATE_NORMAL = 60 * 30 // TODO: need to implement
 
+var CLOCK
 var CLOCK_BLUR
 var CLOCK_X
 var CLOCK_Y
@@ -69,6 +50,8 @@ var timeHolderCanvas
 var timeCanvas
 var noiseHolderCanvas
 
+var alarmsStarted = false
+
 // clock parameters
 const clockFace = {
 	x: CLOCK_X_NORMAL,
@@ -81,6 +64,138 @@ const clockFace = {
 	shake: CLOCK_SHAKE_NORMAL,
 	healRate: CLOCK_HEAL_RATE_NORMAL
 }
+
+// ========== Internal Clock ==========
+
+class InternalClock {
+	constructor() {
+		this.clock = 0
+		this.low = false
+		this.high = false
+		this.alarm = false
+		this.blur = false
+		this.highFade = false
+		this.lowFade = false
+		this.shake = false
+		this.drift = false
+		this.dataOnboard = []
+	}
+
+	newData(data) {
+		if (this.dataOnboard.length > 15) this.dataOnboard.pop()
+		this.dataOnboard.unshift(data)
+	}
+
+	startTrend(trend) {
+		this.clock = millis()
+
+		switch (trend) {
+			case "high":
+				this.high = true
+				break
+			case "low":
+				this.low = true
+				break
+			default:
+				break
+		}
+
+		return true
+	}
+
+	endTrend() {
+		this.clock = 0
+		this.low = false
+		this.high = false
+		this.alarm = false
+		this.blur = false
+		this.highFade = false
+		this.lowFade = false
+		this.shake = false
+		this.drift = false
+	}
+
+	checkClock() {
+		return millis() - this.clock
+	}
+
+	checkTrends() {
+		let sum
+		this.dataOnboard.forEach(data => sum += data)
+
+		let avg = sum / this.dataOnboard.length
+
+		if (!this.high || !this.low) {
+			if (avg >= HIGH) return this.startTrend("high")
+			if (avg <= LOW) return this.startTrend("low")
+		}
+
+		if (this.high || this.low) {
+			if (avg < HIGH) this.endTrend()
+			if (avg > LOW) this.endTrend()
+		}
+
+		return false
+	}
+
+	getHigh() {
+		return this.high
+	}
+
+	getLow() {
+		return this.low
+	}
+
+	getAlarm() {
+		if (millis() - this.clock > ALARM) {
+			this.alarm = true
+			return true
+		}
+		return false
+	}
+
+	getBlur() {
+		if (millis() - this.clock > BLUR) {
+			this.blur = true
+			return true
+		}
+		return false
+	}
+
+	getHighFade() {
+		if (millis() - this.clock > HIGH_FADE) {
+			this.highFade = true
+			return true
+		}
+		return false
+	}
+
+	getLowFade() {
+		if (millis() - this.clock > LOW_FADE) {
+			this.lowFade = true
+			return true
+		}
+		return false
+	}
+
+	getShake() {
+		if (millis() - this.clock > SHAKE) {
+			this.shake = true
+			return true
+		}
+		return false
+	}
+
+	getDrift() {
+		if (millis() - this.clock > DRIFT) {
+			this.drift = true
+			return true
+		}
+		return false
+	}
+}
+
+// ========== P5.JS ==========
 
 // TODO: move this to blur fn - needs to check if in process, etc
 // const tl = gsap.timeline({
@@ -122,6 +237,9 @@ function setup() {
 	noiseHolderCanvas.pixelDensity(1)
 	noiseHolderCanvas.noStroke()
 
+	// create a new clock
+	CLOCK = new InternalClock()
+
 	// TODO: move this to blur fn - needs to check if in process, etc
 	// tl.to(clockFace, {
 	// 	blur: 0.2,
@@ -141,9 +259,6 @@ function setup() {
 	// shakeFace()
 }
 
-let cat = 50
-let runit = false
-
 function draw() {
 	// background of main canvas should be black
 	background(0)
@@ -152,8 +267,10 @@ function draw() {
 
 	blurFace()
 
+	trends()
+
 	// render clock face
-	clock()
+	display()
 
 	// TODO: move draw cycle - needs to check if in process, etc
 
@@ -161,22 +278,30 @@ function draw() {
 	// highAlarm()
 
 	// TODO: move draw cycle - needs to check if in process, etc
-
-	if (cat < 100 && runit) {
-		cat++
-		console.log(clockFace)
-		console.log(CLOCK_ALPHA)
-	}
-
-	// colorMode(HSB)
-	// fill(myCircle.h, 255, 255, myCircle.a);
-	// ellipse(myCircle.x, myCircle.y, myCircle.r, myCircle.r)
-	// ellipse(width / 2, height / 2, myCircle.r, myCircle.r).filter(BLUR, 6)
 }
 
-// ========== Clock ==========
+// ========== Trends ==========
 
-function clock() {
+function trends() {
+	CLOCK.checkTrends()
+
+	if (CLOCK.high) {
+		if (!CLOCK.alarm) return this.getAlarm() ? "do()" : ""
+		if (!CLOCK.blur) return this.getBlur() ? "do()" : ""
+		if (!CLOCK.highFade) return this.getHighFade() ? "do()" : ""
+	}
+
+	if (CLOCK.low) {
+		if (!CLOCK.lowFade) return this.getLowFade() ? "do()" : ""
+		if (!CLOCK.shake) return this.getShake() ? "do()" : ""
+		if (!CLOCK.drift) return this.getDrift() ? "do()" : ""
+	}
+
+}
+
+// ========== Display ==========
+
+function display() {
 	CLOCK_ROTATION = clockFace.rotation
 	CLOCK_ALPHA = Math.floor(clockFace.alpha)
 	CLOCK_X = clockFace.x
@@ -258,22 +383,19 @@ function blurFace() {
 	blurShader.setUniform('texelSize', [(1.0 / width) / CLOCK_BLUR, (1.0 / height) / CLOCK_BLUR])
 }
 
-var osc
-var started = false
-
 function highAlarm() {
 	// source: https://creative-coding.decontextualize.com/synthesizing-analyzing-sound/
-	// tweaks have beeb made.
-
+	// tweaks have been made.
 	ALARM_AMPLITUDE = clockFace.alarmAmplitude
 	ALARM_SPEED = clockFace.alarmSpeed
+	let osc
 
-	if (!started) {
+	if (!alarmsStarted) {
 		osc = new p5.Oscillator()
 		osc.setType('triangle')
 		osc.freq(220)
 		osc.start()
-		started = true
+		alarmsStarted = true
 	}
 
 	osc.amp(ALARM_AMPLITUDE)
@@ -364,53 +486,3 @@ function windowResized() {
 function getRandInt(min, max) {
 	return Math.floor(Math.random() * (max - min + 1)) + min
 }
-
-// ========== Jeff Stuff ==========
-
-// add animation events to the timeline
-// see https://greensock.com/docs/v3/GSAP/Timeline
-
-// Something to play with:
-// const myCircle = {
-// 	x: 50, // position
-// 	y: 50,
-// 	r: 100, // radius
-// 	h: 0, // hue
-// 	a: 1 // alpha
-// }
-
-// An empty timeline, to hold events defined in setup
-// const tl = gsap.timeline({
-// 	repeat: -1,
-// 	repeatDelay: 0.5,
-// 	yoyo: true,
-// 	onStart: myStartFunction,
-// 	onRepeat: myRepeatFunction,
-// 	defaults: {
-// 		ease: "power1.inOut"
-// 	}
-// })
-
-// call a function and pass some variables
-// tl.call(myCallBack, ["One", 2])
-
-//You can attach functions to timeline events, or call them at any time.
-//These are not exciting, but you can bring the sizzle!
-
-// function myStartFunction() {
-// 	print("Start!");
-// }
-
-// function myRepeatFunction() {
-// 	print("Repeating!")
-// }
-
-// function myCallBack(a, b) {
-// 	// print("Callback " + a + ", " + b)
-
-// 	gsap.to(myCircle, {
-// 		h: '+=33',
-// 		ease: "back.inOut(1.7)",
-// 		duration: 1
-// 	});
-// }
