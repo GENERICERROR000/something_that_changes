@@ -16,21 +16,20 @@
 const HIGH = 200
 const LOW = 69
 const SEVERE_LOW = 50
-const ALARM = 60 * 60
-const BLUR = 2 * 60 * 60
-const HIGH_FADE = 2 * 60 * 60
-const SHAKE = 10 * 60
-const DRIFT = 20 * 60
-const LOW_FADE = 30 * 60
+const ALARM = 1000 * 60 * 60
+const BLUR = 1000 * 60 * 60 * 2
+const FADE = 1000 * 60 * 60 * 2
+const SHAKE = 1000 * 60 * 10
+const DRIFT = 1000 * 60 * 20
 
 // baseline settings for clock
 const CLOCK_X_NORMAL = 0 // -windowWidth/2 - windowWidth/2
 const CLOCK_Y_NORMAL = 0 // -windowHeight/2 - windowHeight/2
 const CLOCK_ALPHA_NORMAL = 255 // 225 - 0 (opaque - transparent)	
-const CLOCK_ROTATION_NORMAL = 0 // (-1 - 1) (rotate 360 left - rotate 360 right)
+// const CLOCK_ROTATION_NORMAL = 0 // (-1 - 1) (rotate 360 left - rotate 360 right)
 const CLOCK_BLUR_NORMAL = 7.0 // 7.0 - 0.2 (none - full blur)
 const CLOCK_SHAKE_NORMAL = 0 // TODO: need to implement
-const CLOCK_ALARM_AMPLITUDE_NORMAL = 0.1 // 0.1 - 0.9 (quiet - loud) 
+const CLOCK_ALARM_AMPLITUDE_NORMAL = 0.1 // 0.1 - 0.7 (quiet - loud) 
 const CLOCK_ALARM_SPEED_NORMAL = 25 // 25 - 1 (slow - fast)
 const CLOCK_HEAL_RATE_NORMAL = 60 * 30 // TODO: need to implement
 
@@ -38,7 +37,7 @@ var CLOCK
 var CLOCK_BLUR
 var CLOCK_X
 var CLOCK_Y
-var CLOCK_ROTATION
+// var CLOCK_ROTATION
 var CLOCK_ALPHA
 var ALARM_AMPLITUDE
 var ALARM_SPEED
@@ -50,14 +49,12 @@ var timeHolderCanvas
 var timeCanvas
 var noiseHolderCanvas
 
-var alarmsStarted = false
-
 // clock parameters
 const clockFace = {
 	x: CLOCK_X_NORMAL,
 	y: CLOCK_Y_NORMAL,
 	alpha: CLOCK_ALPHA_NORMAL,
-	rotation: CLOCK_ROTATION_NORMAL,
+	// rotation: CLOCK_ROTATION_NORMAL,
 	blur: CLOCK_BLUR_NORMAL,
 	alarmAmplitude: CLOCK_ALARM_AMPLITUDE_NORMAL,
 	alarmSpeed: CLOCK_ALARM_SPEED_NORMAL,
@@ -69,15 +66,32 @@ const clockFace = {
 
 class InternalClock {
 	constructor() {
+		// clock states
 		this.clock = 0
 		this.low = false
 		this.high = false
 		this.alarm = false
+		this.alarmStarted = false
+		this.alarmMuted = false
 		this.blur = false
-		this.highFade = false
-		this.lowFade = false
+		this.fade = false
 		this.shake = false
 		this.drift = false
+		this.severeLow = false
+
+		// clock timelines
+		this.alarmTL = {}
+		this.blurTL = {}
+		this.fadeTL = {}
+		this.shakeTL = {}
+		this.driftL = {}
+
+		// oscillator
+		this.osc = new p5.Oscillator()
+		this.osc.setType('triangle')
+		this.osc.freq(220)
+
+		// data to calc avg from
 		this.dataOnboard = []
 	}
 
@@ -109,8 +123,7 @@ class InternalClock {
 		this.high = false
 		this.alarm = false
 		this.blur = false
-		this.highFade = false
-		this.lowFade = false
+		this.fade = false
 		this.shake = false
 		this.drift = false
 	}
@@ -127,6 +140,7 @@ class InternalClock {
 
 		if (!this.high || !this.low) {
 			if (avg >= HIGH) return this.startTrend("high")
+			if (this.dataOnboard[0] <= SEVERE_LOW) this.severeLow = true
 			if (avg <= LOW) return this.startTrend("low")
 		}
 
@@ -138,15 +152,15 @@ class InternalClock {
 		return false
 	}
 
-	getHigh() {
+	checkHigh() {
 		return this.high
 	}
 
-	getLow() {
+	checkLow() {
 		return this.low
 	}
 
-	getAlarm() {
+	checkAlarm() {
 		if (millis() - this.clock > ALARM) {
 			this.alarm = true
 			return true
@@ -154,7 +168,7 @@ class InternalClock {
 		return false
 	}
 
-	getBlur() {
+	checkBlur() {
 		if (millis() - this.clock > BLUR) {
 			this.blur = true
 			return true
@@ -162,23 +176,15 @@ class InternalClock {
 		return false
 	}
 
-	getHighFade() {
-		if (millis() - this.clock > HIGH_FADE) {
-			this.highFade = true
+	checkFade() {
+		if (millis() - this.clock > FADE) {
+			this.fade = true
 			return true
 		}
 		return false
 	}
 
-	getLowFade() {
-		if (millis() - this.clock > LOW_FADE) {
-			this.lowFade = true
-			return true
-		}
-		return false
-	}
-
-	getShake() {
+	checkShake() {
 		if (millis() - this.clock > SHAKE) {
 			this.shake = true
 			return true
@@ -186,21 +192,30 @@ class InternalClock {
 		return false
 	}
 
-	getDrift() {
+	checkDrift() {
 		if (millis() - this.clock > DRIFT) {
 			this.drift = true
 			return true
 		}
 		return false
 	}
+
+	checkSevereLow() {
+		if (this.dataOnboard[0] <= SEVERE_LOW) {
+			this.severeLow = true
+			return true
+		}
+		return false
+	}
+
+	checkLow() {
+		if (this.dataOnboard[0] > SEVERE_LOW) {
+			this.severeLow = false
+		}
+	}
 }
 
 // ========== P5.JS ==========
-
-// TODO: move this to blur fn - needs to check if in process, etc
-// const tl = gsap.timeline({
-// 	repeat: 0
-// })
 
 function preload() {
 	// load shaders
@@ -239,45 +254,21 @@ function setup() {
 
 	// create a new clock
 	CLOCK = new InternalClock()
-
-	// TODO: move this to blur fn - needs to check if in process, etc
-	// tl.to(clockFace, {
-	// 	blur: 0.2,
-	// 	duration: 60 * 24
-	// })
-
-	// TODO: move draw cycle - needs to check if in process, etc
-	// driftFace()
-
-	// TODO: move draw cycle - needs to check if in process, etc
-	// rotateFace()
-
-	// TODO: move draw cycle - needs to check if in process, etc
-	// fadeOutFace()
-
-	// TODO: move draw cycle - needs to check if in process, etc
-	// shakeFace()
 }
 
 function draw() {
 	// background of main canvas should be black
 	background(0)
 
-	severeLow()
-
-	blurFace()
-
+	// check trends
 	trends()
 
 	// render clock face
 	display()
 
-	// TODO: move draw cycle - needs to check if in process, etc
-
-	// TODO: move draw cycle - needs to check if in process, etc
-	// highAlarm()
-
-	// TODO: move draw cycle - needs to check if in process, etc
+	if (CLOCK.alarm) {
+		highAlarm()
+	}
 }
 
 // ========== Trends ==========
@@ -286,17 +277,17 @@ function trends() {
 	CLOCK.checkTrends()
 
 	if (CLOCK.high) {
-		if (!CLOCK.alarm) return this.getAlarm() ? "do()" : ""
-		if (!CLOCK.blur) return this.getBlur() ? "do()" : ""
-		if (!CLOCK.highFade) return this.getHighFade() ? "do()" : ""
+		if (!CLOCK.alarm) this.checkAlarm() ? "do()" : "" // highAlarm()
+		if (!CLOCK.blur) this.checkBlur() ? "do()" : "" // blurFace()
+		if (!CLOCK.fade) this.checkDade() ? "do()" : "" // fadeFace()
 	}
 
 	if (CLOCK.low) {
-		if (!CLOCK.lowFade) return this.getLowFade() ? "do()" : ""
-		if (!CLOCK.shake) return this.getShake() ? "do()" : ""
-		if (!CLOCK.drift) return this.getDrift() ? "do()" : ""
+		if (!CLOCK.shake) this.checkShake() ? "do()" : "" // shakeFace()
+		if (!CLOCK.drift) this.checkDrift() ? "do()" : "" // driftFace()
+		if (!CLOCK.severeLow) this.checkSevereLow()
+		if (CLOCK.severeLow) CLOCK.checkLow()
 	}
-
 }
 
 // ========== Display ==========
@@ -307,32 +298,37 @@ function display() {
 	CLOCK_X = clockFace.x
 	CLOCK_Y = clockFace.y
 
-	// TODO: only do if severe high
-	// settings for clock background
-	// noiseHolderCanvas.rect(0, 0, width, height)
+	renderBlurShader()
 
-	// // render noiseHolderCanvas to main canvas
-	// image(noiseHolderCanvas, 0, 0, windowWidth, windowHeight)
+	if (CLOCK.severeLow) {
+		severeLow()
+
+		// settings for clock background
+		noiseHolderCanvas.rect(0, 0, width, height)
+
+		// // render noiseHolderCanvas to main canvas
+		image(noiseHolderCanvas, 0, 0, windowWidth, windowHeight)
+	}
 
 	// settings for clock face
-	timeCanvas.background('rgba(0, 0, 0, 0)');
+	timeCanvas.background('rgba(0, 0, 0, 0)')
 	timeCanvas.textFont(clockFont)
 	timeCanvas.textAlign(CENTER, CENTER)
 	timeCanvas.textSize(width / 6)
 
 	// text alpha 
-	timeCanvas.fill(255, 0, 0, CLOCK_ALPHA)
+	timeCanvas.fill(255, 255, 255, CLOCK_ALPHA)
 
 	// text rotation
-	timeCanvas.push()
-	timeCanvas.rotate(CLOCK_ROTATION)
+	// timeCanvas.push()
+	// timeCanvas.rotate(CLOCK_ROTATION)
 
-	// get time
+	// check time
 	let time = getTime()
 
 	// write text to timeCanvas
 	timeCanvas.text(time, CLOCK_X, CLOCK_Y)
-	timeCanvas.pop()
+	// timeCanvas.pop()
 
 	// create geometry for text to render on
 	timeHolderCanvas.rect(0, 0, windowWidth, windowHeight)
@@ -346,34 +342,16 @@ function getTime() {
 	let min = minute()
 	let secs = second()
 
+	if (secs < 10) secs = "0" + secs
 	if (min < 10) min = "0" + min
+	if (hr < 10) hr = "0" + hr
 
 	return hr + ":" + min + ":" + secs
 }
 
-// ========== Effects ==========
-
-// function healRate() {
-
-// }
-
-function severeLow() {
-	// TODO: ability tp start and stop
-	// load shader to timeHolderCanvas
-	noiseHolderCanvas.shader(noiseShader)
-
-	// pass text canvas as image to shader
-	// (will be rendered on timeHolderCanvas)
-	// noiseShader.setUniform("tex0", timeCanvas)
-	noiseShader.setUniform("iResolution", [width, height])
-	noiseShader.setUniform("iFrame", frameCount)
-	// noiseShader.setUniform("iMouse", [mouseX, map(mouseY, 0, height, height, 0)])
-}
-
-function blurFace() {
+function renderBlurShader() {
 	CLOCK_BLUR = clockFace.blur
 
-	// TODO: shader stuff needs to happen regardless of blur state
 	// load shader to timeHolderCanvas
 	timeHolderCanvas.shader(blurShader)
 
@@ -383,98 +361,115 @@ function blurFace() {
 	blurShader.setUniform('texelSize', [(1.0 / width) / CLOCK_BLUR, (1.0 / height) / CLOCK_BLUR])
 }
 
+// ========== Effects ==========
+
+function severeLow() {
+	// load shader to timeHolderCanvas
+	noiseHolderCanvas.shader(noiseShader)
+
+	// pass text canvas as image to shader
+	// (will be rendered on timeHolderCanvas)
+	noiseShader.setUniform("iResolution", [width, height])
+	noiseShader.setUniform("iFrame", frameCount)
+}
+
 function highAlarm() {
 	// source: https://creative-coding.decontextualize.com/synthesizing-analyzing-sound/
 	// tweaks have been made.
 	ALARM_AMPLITUDE = clockFace.alarmAmplitude
-	ALARM_SPEED = clockFace.alarmSpeed
-	let osc
+	ALARM_SPEED = Math.floor(clockFace.alarmSpeed)
 
-	if (!alarmsStarted) {
-		osc = new p5.Oscillator()
-		osc.setType('triangle')
-		osc.freq(220)
-		osc.start()
-		alarmsStarted = true
+	if (!CLOCK.alarmStarted) {
+		CLOCK.osc.start()
+
+		CLOCK.alarmTL = new TweenLite.fromTo(clockFace, {
+			alarmAmplitude: CLOCK_ALARM_AMPLITUDE_NORMAL,
+			alarmSpeed: CLOCK_ALARM_SPEED_NORMAL,
+		}, {
+			alarmAmplitude: 0.7,
+			alarmSpeed: 1,
+			duration: 60 * 60
+		})
+
+		CLOCK.alarm = true
+		CLOCK.alarmStarted = true
 	}
 
-	osc.amp(ALARM_AMPLITUDE)
+	if (!CLOCK.alarmMuted) {
+		// console.log("hit");
+		CLOCK.osc.amp(ALARM_AMPLITUDE)
 
-	if (frameCount % ALARM_SPEED == 0) {
-		osc.freq(midiToFreq(int(random(31, 80))))
+		if (frameCount % ALARM_SPEED == 0) {
+			CLOCK.osc.freq(midiToFreq(int(random(31, 80))))
+		}
 	}
 }
+
+function mouseMoved() {
+	if (CLOCK && CLOCK.alarm && !CLOCK.alarmMuted) {
+		pauseAlarm()
+	}
+}
+
+function pauseAlarm() {
+	CLOCK.osc.stop()
+
+	setTimeout(() => {
+		CLOCK.osc.alarmMuted = false
+		CLOCK.osc.start()
+		// }, 1000 * 60 * 20)
+	}, 2000) // NOTE: for demo
+}
+
+function blurFace() {
+	CLOCK.blurTL = new TweenLite.to(clockFace, {
+		blur: 0.2,
+		// duration: 60 * 60 
+		duration: 60 // NOTE: for demo
+	})
+}
+
+// WARN: TODO: shake and drift both effect `x` - so currently canceling each other out
+// - one needs to ref x, and the other needs to apply some change to that value
 
 function shakeFace() {
 	// source: https://greensock.com/forums/topic/10721-shake-animation/?do=findComment&comment=42778
-	// TODO: use this method for rotation
-	gsap.to(clockFace, 0.1, {
-		x: "+=20",
+	CLOCK.shakeTL = new TweenLite.to(clockFace, {
+		x: "+=10",
 		yoyo: true,
-		repeat: -1
+		repeat: -1,
+		duration: 0.1
 	})
-	gsap.to(clockFace, 0.1, {
-		x: "-=20",
-		yoyo: true,
-		repeat: -1
-	})
-}
-
-function rotateFace() {
-	// NOTE: TODO: this basiclly works, just needs to be set when know how want to use
-	// var tl = new TimelineLite({
-	// 		repeat: -1,
-	// 		delay: 0.5
-	// 	})
-	// 	.to(clockFace, 1, {
-	// 		rotation: 0.2,
-	// 		ease: "power1.out"
-	// 	})
-	// 	.to(clockFace, 1, {
-	// 		rotation: -0.2,
-	// 		ease: "power1.out"
-	// 	})
-
-	var tl = new TimelineLite({
-			repeat: -1,
-			delay: 1.5,
-			// yoyo: true
-		})
-		.to(clockFace, 1, {
-			rotation: 0.2,
-			ease: "power1.out"
-		})
-		.to(clockFace, 1, {
-			rotation: -0.2,
-			ease: "power1.inOut"
-		})
 }
 
 function driftFace() {
-	// NOTE: gsap or TimelineLite?
 	let winW = windowWidth / 2
 	let winH = windowHeight / 2
 	let newX = getRandInt(-winW, winW)
 	let newY = getRandInt(-winH, winH)
 
-	gsap.fromTo(clockFace, {
+	CLOCK.driftTL = new TweenLite.fromTo(clockFace, {
 		x: 0,
 		y: 0,
 	}, {
 		x: newX,
 		y: newY,
-		duration: 60
+		// duration: 60 * 60
+		duration: 60 // NOTE: for demo
 	})
 }
 
-function fadeOutFace() {
-	var tl = new TimelineLite({
-			repeat: 0
-		})
-		.to(clockFace, 60, {
-			alpha: 0,
-		})
+function fadeFace() {
+	CLOCK.fadeTL = new TweenLite.to(clockFace, {
+		alpha: 0,
+		// duration: 60 * 60
+		duration: 60 // NOTE: for demo
+	})
 }
+
+// function healRate() {
+
+// }
 
 // ========== Helpers ==========
 
