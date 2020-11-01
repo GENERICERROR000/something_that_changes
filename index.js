@@ -8,8 +8,8 @@
 	digital clock source
 		https://editor.p5js.org/D_Snyder/sketches/Xtx2Zu9D5
 
-	data generator source
-		https://github.com/openmhealth/sample-data-generator
+	green sock cheat sheet
+		https://ihatetomatoes.net/wp-content/uploads/2016/07/GreenSock-Cheatsheet-4.pdf
 */
 
 // baseline settings for trends
@@ -29,7 +29,7 @@ const CLOCK_ALPHA_NORMAL = 255 // 225 - 0 (opaque - transparent)
 // const CLOCK_ROTATION_NORMAL = 0 // (-1 - 1) (rotate 360 left - rotate 360 right)
 const CLOCK_BLUR_NORMAL = 7.0 // 7.0 - 0.2 (none - full blur)
 const CLOCK_SHAKE_NORMAL = 0 // TODO: need to implement
-const CLOCK_ALARM_AMPLITUDE_NORMAL = 0.1 // 0.1 - 0.7 (quiet - loud) 
+const CLOCK_ALARM_AMPLITUDE_NORMAL = 0.01 // 0.01 - 0.7 (quiet - loud) 
 const CLOCK_ALARM_SPEED_NORMAL = 25 // 25 - 1 (slow - fast)
 const CLOCK_HEAL_RATE_NORMAL = 60 * 30 // TODO: need to implement
 
@@ -388,7 +388,8 @@ function highAlarm() {
 		}, {
 			alarmAmplitude: 0.7,
 			alarmSpeed: 1,
-			duration: 60 * 60
+			// duration: 60 * 60
+			duration: 60 // NOTE: for demo
 		})
 
 		CLOCK.alarm = true
@@ -425,7 +426,7 @@ function blurFace() {
 	CLOCK.blurTL = new TweenLite.to(clockFace, {
 		blur: 0.2,
 		// duration: 60 * 60 
-		duration: 60 // NOTE: for demo
+		duration: 30 // NOTE: for demo
 	})
 }
 
